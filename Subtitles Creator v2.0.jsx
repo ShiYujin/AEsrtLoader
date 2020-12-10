@@ -7,10 +7,10 @@
 // 1.1.0 update - 21.10.2017
 // 1.2.0 update - 27.02.2018
 
-#include SC_Src / script / MathUtils.jsx;
-#include SC_Src / script / AFUtils.jsx;
-#include SC_Src / script / Defaults.jsx;
-#include SC_Src / script / saveSrt.jsx;
+#include SC_Src/script/MathUtils.jsx;
+#include SC_Src/script/AFUtils.jsx;
+#include SC_Src/script/Defaults.jsx;
+#include SC_Src/script/saveSrt.jsx;
 
 (function Template(thisObj) {
 	var MAX_WIDTH = 0;
@@ -85,6 +85,8 @@
 
 		rootRes += "saveSrt:Button{size:[80,28],text:'Export SRT'},"
 		rootRes += "getSrt:Button{size:[80,28],text:'Import SRT'},"
+
+		rootRes += "getLrc:Button{size:[80,28],text:'Import LRC'},"
 
 		rootRes += "}";// End Buttons
 		rootRes += "}"; // End mainContent
@@ -255,12 +257,12 @@
 							}
 						}
 					}
-				}	///alert(				palleteObj.rootGrp.mainContent.input.text )
+				}	///alert(palleteObj.rootGrp.mainContent.input.text )
 
 
 
 				palleteObj.rootGrp.mainContent.input.text = allSrtContent;
-				//	alert(				palleteObj.rootGrp.mainContent.input.text )
+				//	alert(palleteObj.rootGrp.mainContent.input.text )
 				//palleteObj.layout.layout(true);
 				// palleteObj.layout.resize();
 				return markerTimeArr
@@ -290,6 +292,156 @@
 			app.endUndoGroup();
 
 		}
+
+		var allLrcContent = "";
+		palleteObj.rootGrp.mainContent.buttons.getLrc.onClick = function () {
+			var currentComp = app.project.activeItem;
+
+			if (currentComp && currentComp instanceof CompItem) {
+				var targetLayer = currentComp.selectedLayers; // check comp selected
+				if (targetLayer.length != 0) { // check layer selected
+
+					palleteObj.rootGrp.mainContent.input.text = "";
+					var lrcMarkerTime = getLrcaddMarkers();
+					if (lrcMarkerTime.length == 0) { return }
+					addSubtitles();
+					addPause(lrcMarkerTime);
+
+				} else {
+					alert("First, select an empty text layer")
+				}
+
+			} else {
+				alert("First, select an empty text layer")
+			}
+
+		}
+		function getLrcaddMarkers() {
+			app.beginUndoGroup("get lrc");
+
+			var tempFile = new File;
+			var tempFile = tempFile.openDlg("Open a file", "Acceptable Files:*.lrc");
+
+			if (tempFile == null) { return null } //check if it press Esc key
+
+			var filePathString = tempFile.fsName;
+
+			if (tempFile.exists == true) {
+				tempFile.open("r");
+				var fileContents = tempFile.read();
+				tempFile.close();
+			} else {
+				alert("That file doesn't exist");
+				return ""
+			}
+
+			if (fileContents.length < 3) {
+				return "This file is empty";
+			}
+
+			var srtMarkerTimeArr = extractLrcTimeTextAndAddMarkers(fileContents);
+
+			return srtMarkerTimeArr;
+
+			function clearAllMarkers(targetLayer) {
+				var nKey = targetLayer.property("ADBE Marker");
+				//	alert(nKey.reflect.properties.toString().replace(/,/g, "\n"))
+				//alert(nKey.reflect.methods.toString().replace(/,/g, "\n"))
+				if (nKey.numKeys > 0) {
+					for (var i = nKey.numKeys; i > 0; i--) {
+						nKey.removeKey(i)
+					}
+				}
+			}
+			function extractLrcTimeTextAndAddMarkers(srtSring) {
+				var tempArr = srtSring.split('\n'); /// num, time and text group
+
+				if (tempArr.length > 150) { // if the file is too large
+
+					var myWindow = new Window("dialog", "Do you want to continue?");
+					var myInputGroup = myWindow.add("group");
+
+					var msg = tempArr.length + " lines found. It may take a cople of minite to load all lines."
+					myInputGroup.add("statictext", undefined, msg);
+
+					var myButtonGroup = myWindow.add("group");
+					myButtonGroup.alignment = "right";
+					var okBtn = myButtonGroup.add("button", undefined, "OK");
+					var cancelBtn = myButtonGroup.add("button", undefined, "Cancel");
+
+					okBtn.onClick = function () {
+						myWindow.close();
+					}
+					var cancelRezult = false;
+					cancelBtn.onClick = function () {
+						myWindow.close();
+						cancelRezult = true;
+					}
+					myWindow.show();
+				}
+				if (cancelRezult == true) { // user pressed Cancel
+					return []
+				}
+
+				var currentComp = app.project.activeItem;
+				var targetLayer = currentComp.selectedLayers[0];
+				var markerTimeArr = [];
+				allLrcContent = "";
+				clearAllMarkers(targetLayer);
+
+				var prevTime = 0;
+				var firstLine = true;
+				for (i = 0; i < tempArr.length; i++) {
+					if (tempArr[i] != "") {
+						if(tempArr[i][1] < '0' || tempArr[i][1] > '9')
+							continue;
+
+						var pivot0 = tempArr[i].indexOf("[");
+						var pivot1 = tempArr[i].indexOf("]");
+						var timeString = tempArr[i].substr(pivot0 + 1, pivot1 - 1);
+						var contentString = tempArr[i].substr(pivot1 + 1);
+						var thisTime = convertTimeToSec(timeString);
+
+						if(firstLine)
+							firstLine = false;
+						else{
+							if(thisTime - 0.05 < prevTime)
+								markerTimeArr.push([prevTime, prevTime + 0.005]);
+							else
+								markerTimeArr.push([prevTime, thisTime - 0.05]);
+							
+							var markerLable = new MarkerValue("start" + (i));
+							targetLayer.property("ADBE Marker").setValueAtTime(thisTime, markerLable);
+						}
+						allLrcContent += contentString + "\n";
+
+						prevTime = thisTime;
+
+						function convertTimeToSec(hms) {
+							hms = hms.replace(/ /g, ""); // remove  space
+							var a = hms.split(/[^0-9]/);
+							var seconds = 0;
+							if(a.length == 3)
+								seconds = (+a[0]) * 60 + (+a[1]) + (+a[2]) / 100;
+							else if(a.length == 4)
+								seconds = (+a[0]) * 60 * 60 + (+a[1]) * 60 + (+a[2]) + (+a[3]) / 100;
+							return seconds
+						}
+					}
+				}
+
+				markerTimeArr.push([prevTime, prevTime + 60]);
+
+				palleteObj.rootGrp.mainContent.input.text = allLrcContent;
+				//	alert(palleteObj.rootGrp.mainContent.input.text )
+				//palleteObj.layout.layout(true);
+				// palleteObj.layout.resize();
+				return markerTimeArr
+
+			}
+			app.endUndoGroup();
+		}
+
 
 		palleteObj.rootGrp.mainContent.buttons.editBtn.onClick = function () {
 
